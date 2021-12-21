@@ -20,7 +20,7 @@ constexpr float LED_FLOOR = 60.0f;
 constexpr auto vertexShaderSource = R"(
 #version 330 core
 layout (location = 0) in vec3 aPos;
-layout (location = 1) in vec3 aOffset;
+layout (location = 1) in mat4 aOffset;
 
 uniform mat4 model;
 uniform mat4 view;
@@ -28,7 +28,7 @@ uniform mat4 projection;
 
 void main()
 {
-    gl_Position = projection * view * model * vec4(aPos+aOffset, 1.0);
+    gl_Position = projection * view * model * aOffset * vec4(aPos, 1.0);
 }
 )";
 
@@ -78,6 +78,87 @@ void error_callback(int error, const char *description) {
             << std::endl;
 }
 
+void APIENTRY glDebugOutput(GLenum source, GLenum type, unsigned int id,
+                            GLenum severity, GLsizei length,
+                            const char *message, const void *userParam) {
+  // ignore non-significant error/warning codes
+  if (id == 131169 || id == 131185 || id == 131218 || id == 131204)
+    return;
+
+  std::cout << "---------------" << std::endl;
+  std::cout << "Debug message (" << id << "): " << message << std::endl;
+
+  switch (source) {
+  case GL_DEBUG_SOURCE_API:
+    std::cout << "Source: API";
+    break;
+  case GL_DEBUG_SOURCE_WINDOW_SYSTEM:
+    std::cout << "Source: Window System";
+    break;
+  case GL_DEBUG_SOURCE_SHADER_COMPILER:
+    std::cout << "Source: Shader Compiler";
+    break;
+  case GL_DEBUG_SOURCE_THIRD_PARTY:
+    std::cout << "Source: Third Party";
+    break;
+  case GL_DEBUG_SOURCE_APPLICATION:
+    std::cout << "Source: Application";
+    break;
+  case GL_DEBUG_SOURCE_OTHER:
+    std::cout << "Source: Other";
+    break;
+  }
+  std::cout << std::endl;
+
+  switch (type) {
+  case GL_DEBUG_TYPE_ERROR:
+    std::cout << "Type: Error";
+    break;
+  case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR:
+    std::cout << "Type: Deprecated Behaviour";
+    break;
+  case GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR:
+    std::cout << "Type: Undefined Behaviour";
+    break;
+  case GL_DEBUG_TYPE_PORTABILITY:
+    std::cout << "Type: Portability";
+    break;
+  case GL_DEBUG_TYPE_PERFORMANCE:
+    std::cout << "Type: Performance";
+    break;
+  case GL_DEBUG_TYPE_MARKER:
+    std::cout << "Type: Marker";
+    break;
+  case GL_DEBUG_TYPE_PUSH_GROUP:
+    std::cout << "Type: Push Group";
+    break;
+  case GL_DEBUG_TYPE_POP_GROUP:
+    std::cout << "Type: Pop Group";
+    break;
+  case GL_DEBUG_TYPE_OTHER:
+    std::cout << "Type: Other";
+    break;
+  }
+  std::cout << std::endl;
+
+  switch (severity) {
+  case GL_DEBUG_SEVERITY_HIGH:
+    std::cout << "Severity: high";
+    break;
+  case GL_DEBUG_SEVERITY_MEDIUM:
+    std::cout << "Severity: medium";
+    break;
+  case GL_DEBUG_SEVERITY_LOW:
+    std::cout << "Severity: low";
+    break;
+  case GL_DEBUG_SEVERITY_NOTIFICATION:
+    std::cout << "Severity: notification";
+    break;
+  }
+  std::cout << std::endl;
+  std::cout << std::endl;
+}
+
 void key_callback(GLFWwindow *window, int key, int /*scancode*/, int action,
                   int /*mods*/) {
   if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
@@ -96,8 +177,7 @@ void processInput(GLFWwindow *window) {
 void camera(uint32_t shaderId, float dist) {
   glm::mat4 view = glm::mat4(1.0f);
 
-  float zFar =
-    2 + dist; //(SCREEN_WIDTH / 2.0f) / tanf64(fov / 2.0f); // was 90.0f
+  float zFar = (SCREEN_WIDTH / 2.0f) / tanf64(fov / 2.0f); // was 90.0f
   glm::vec3 cameraPos =
     glm::vec3(SCREEN_WIDTH / 2.0f, SCREEN_HEIGHT / 2.0f, zFar);
   glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
@@ -147,6 +227,14 @@ int main() {
   // clang-format on
 
   auto starOffsets = generateStarOffsets(1000);
+  std::vector<glm::mat4> offsetMatrices;
+
+  for (const auto &vec : starOffsets) {
+    glm::mat4 model = glm::mat4(1.0f);
+    model = glm::translate(model, vec);
+    offsetMatrices.push_back(model);
+  }
+
   float deltaTime = 0.0f; // Time between current frame and last frame
   float lastFrame = 0.0f; // Time of last frame
 
@@ -189,6 +277,15 @@ int main() {
   // Accept fragment if it closer to the camera than the former one
   glDepthFunc(GL_LESS);
 
+  int flags;
+  glGetIntegerv(GL_CONTEXT_FLAGS, &flags);
+  if (flags & GL_CONTEXT_FLAG_DEBUG_BIT) {
+    std::cout << "debug mode enabled!" << std::endl;
+    glDebugMessageCallback(glDebugOutput, nullptr);
+    glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, nullptr,
+                          GL_TRUE);
+  }
+
   unsigned int VAO;
   glGenVertexArrays(1, &VAO);
 
@@ -206,17 +303,35 @@ int main() {
   // end verticies
 
   // instance data
+
   unsigned int instanceVBO;
   glGenBuffers(1, &instanceVBO);
   glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
-  glBufferData(GL_ARRAY_BUFFER, starOffsets.size() * sizeof(glm::vec3),
-               &starOffsets[0], GL_STATIC_DRAW);
+  glBufferData(GL_ARRAY_BUFFER, offsetMatrices.size() * sizeof(glm::mat4),
+               offsetMatrices.data(), GL_STATIC_DRAW);
+  // here we have to do this 4 times since vec 4 is max per attrib pointer
+  //  and our matrix is 4x4
 
-  glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
+  glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 1 * sizeof(glm::mat4),
+                        (void *)0);
   glEnableVertexAttribArray(1);
-  glVertexAttribDivisor(1, 0);
+  glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, 1 * sizeof(glm::mat4),
+                        (void *)(2 * sizeof(glm::vec4)));
+  glEnableVertexAttribArray(2);
+  glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, 1 * sizeof(glm::mat4),
+                        (void *)(2 * sizeof(glm::vec4)));
+  glEnableVertexAttribArray(3);
+  glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, 1 * sizeof(glm::mat4),
+                        (void *)(3 * sizeof(glm::vec4)));
+  glEnableVertexAttribArray(4);
+
+  glVertexAttribDivisor(1, 1);
+  glVertexAttribDivisor(2, 1);
+  glVertexAttribDivisor(3, 1);
+  glVertexAttribDivisor(4, 1);
 
   glBindBuffer(GL_ARRAY_BUFFER, 0);
+
   // end instance data
 
   auto vertexShader = loadShaders(vertexShaderSource, GL_VERTEX_SHADER);
@@ -250,27 +365,20 @@ int main() {
     dist += 1.0f;
 
     glBindVertexArray(VAO);
-    // for (auto &poly : starOffsets) {
     {
-      auto poly = starOffsets[0];
-      // std::cout<<poly.x<<" "<< poly.y<< " " <<poly.z<<std::endl;
-
       glm::mat4 model = glm::mat4(1.0f);
       // model = glm::rotate(model, glm::radians(-2.8f), glm::vec3(1.0, 0.0,
-      // 0.0));
-
-      // model = glm::translate(model, glm::vec3(1.0, 1.0, 60.0));
-      // model = glm::scale(model, glm::vec3(8.0, 8.0, 1.0));
+      //  0.0));
+      model = glm::translate(model, glm::vec3(1.0f, 1.0f, 0.0f));
+      //  model = glm::scale(model, glm::vec3(8.0, 8.0, 1.0));
 
       int modelLoc = glGetUniformLocation(shaderProgram, "model");
       glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
 
       dz.z = 64.0f * deltaTime / 1.0f;
-      /*std::cout << "poly.z " << poly.z << " deltatime " << deltaTime
-                << std::endl;
-    */
       glDrawArraysInstanced(GL_TRIANGLES, 0, 6, starOffsets.size());
-      // glBindVertexArray(0);
+
+      glBindVertexArray(0);
     }
 
     glfwSwapBuffers(window);
