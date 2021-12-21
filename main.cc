@@ -1,10 +1,15 @@
+// clang-format off
 #include "glad.h" // must be before glfw.h
 #include <GLFW/glfw3.h>
+// clang-format on
+#include <cmath>
+#include <cstdlib>
+#include <ctime>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <iostream>
-#include <mikmod.h>
+#include <random>
 #include <vector>
 
 constexpr int32_t SCREEN_WIDTH = 1600;
@@ -15,6 +20,7 @@ constexpr float LED_FLOOR = 60.0f;
 constexpr auto vertexShaderSource = R"(
 #version 330 core
 layout (location = 0) in vec3 aPos;
+layout (location = 1) in vec3 aOffset;
 
 uniform mat4 model;
 uniform mat4 view;
@@ -22,7 +28,7 @@ uniform mat4 projection;
 
 void main()
 {
-    gl_Position = projection * view * model * vec4(aPos, 1.0);
+    gl_Position = projection * view * model * vec4(aPos+aOffset, 1.0);
 }
 )";
 
@@ -36,7 +42,6 @@ void main()
 } )";
 
 unsigned int loadShaders(const char *shaderSource, GLenum shaderType) {
-
   unsigned int shader{0};
   int success{0};
   char infoLog[1024];
@@ -88,12 +93,13 @@ void processInput(GLFWwindow *window) {
     glfwSetWindowShouldClose(window, true);
 }
 
-void camera(uint32_t shaderId) {
+void camera(uint32_t shaderId, float dist) {
   glm::mat4 view = glm::mat4(1.0f);
 
-  float zFar = (SCREEN_WIDTH / 2.0f) / tanf64(fov / 2.0f); // was 90.0f
+  float zFar =
+    2 + dist; //(SCREEN_WIDTH / 2.0f) / tanf64(fov / 2.0f); // was 90.0f
   glm::vec3 cameraPos =
-      glm::vec3(SCREEN_WIDTH / 2.0f, SCREEN_HEIGHT / 2.0f, zFar);
+    glm::vec3(SCREEN_WIDTH / 2.0f, SCREEN_HEIGHT / 2.0f, zFar);
   glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
   //  std::cout << " x= " << cameraPos.x << " y = " << cameraPos.y
   //            << " z = " << cameraPos.z << " zFar = " << zFar << " tan µ "
@@ -107,79 +113,40 @@ void camera(uint32_t shaderId) {
   glUniformMatrix4fv(modelView, 1, GL_FALSE, glm::value_ptr(view));
 }
 
-std::vector<glm::vec3> generateLeds(uint32_t amount) {
+std::vector<glm::vec3> generateStarOffsets(uint32_t amount) {
+  std::random_device r;
+  std::default_random_engine e1(r());
+  std::uniform_int_distribution<int> xrand(0, (float)SCREEN_WIDTH);
+  std::uniform_int_distribution<int> yrand(0, (float)SCREEN_HEIGHT);
+  std::uniform_int_distribution<int> zrand(LED_FLOOR, 100.0f);
   std::vector<glm::vec3> retVal;
-  constexpr float newParameter = 16.0f;
-  for (float y = 0; y < (float)amount; ++y) {
-    for (float x = 0; x < (float)amount; ++x) {
-      glm::vec3 vertex(SCREEN_WIDTH / 2.0 + (float)x * newParameter -
-                           amount / 2.0f * newParameter,
-                       SCREEN_HEIGHT / 2.0 + (float)y * newParameter -
-                           amount / 2.0f * newParameter,
-                       LED_FLOOR);
-      std::cout << vertex.x << " " << vertex.y << " " << vertex.z << std::endl;
 
-      retVal.push_back(vertex);
-    }
+  for (float index = 0; index < (float)amount; ++index) {
+    glm::vec3 vertex((float)xrand(e1), (float)yrand(e1), (float)zrand(e1));
+    std::cout << vertex.x << " " << vertex.y << " " << vertex.z << std::endl;
+
+    retVal.push_back(vertex);
   }
 
   return retVal;
 }
 
-std::vector<float> generatedLedVertices(std::vector<float> &led,
-                                        uint32_t amount) {
-  std::vector<float> retVal;
-  for (uint32_t i = 0; i < amount; i++) {
-    for (auto coord : led) {
-      retVal.push_back(coord);
-    }
-  }
-  return retVal;
-}
-
-void dropLed(std::vector<glm::vec3> &leds, uint32_t amount, float zFar) {
-  auto noLeds = leds.size();
-  uint32_t iterations{0};
-  uint32_t i{0};
-
-  while (i < amount && iterations < noLeds) {
-    iterations++;
-    auto index = rand() % (noLeds - 1);
-    if (leds[index].z < LED_FLOOR + 1.0f) {
-      // std::cout << "dropping led at index " << index << std::endl;
-      leds[index].z = zFar + rand() % (5 - 1);
-      i++;
-    }
-  }
-}
-
-MODULE *initMikMod() {
-  MODULE *module{nullptr};
-
-  /* register all the drivers */
-  MikMod_RegisterAllDrivers();
-
-  /* register all the module loaders */
-  MikMod_RegisterAllLoaders();
-
-  /* initialize the library */
-  md_mode |= DMODE_SOFT_MUSIC;
-  if (MikMod_Init("")) {
-    fprintf(stderr, "Could not initialize sound, reason: %s\n",
-            MikMod_strerror(MikMod_errno));
-    return nullptr;
-  }
-  module = Player_Load("resonance2.mod", 64, 0);
-  return module;
-}
 int main() {
-  std::vector<float> led = {
-      0.5f,  0.5f, 0.0f, 0.5f,  -0.5f, 0.0f, -0.5f, 0.5f,  0.0f,
+  std::srand(
+    std::time(nullptr)); // use current time as seed for random generator
+  int random_variable = std::rand();
+  // clang-format off
+  std::vector<float> star = {
+      -0.5f, -0.5f, 0.0f,
+       0.5f, -0.5f, 0.0f,
+       0.5f,  0.5f, 0.0f,
+      -0.5f, -0.5f, 0.0f,
+       0.5f,  0.5f, 0.0f,
+      -0.5f,  0.5f, 0.0f
+  };
+  // clang-format on
 
-      -0.5f, 0.5f, 0.0f, -0.5f, -0.5f, 0.0f, 0.5f,  -0.5f, 0.0f};
-
-  auto leds = generateLeds(64);
-  auto ledVertices = generatedLedVertices(led, 32);
+  auto starOffsets = generateStarOffsets(1000);
   float deltaTime = 0.0f; // Time between current frame and last frame
   float lastFrame = 0.0f; // Time of last frame
 
@@ -191,10 +158,14 @@ int main() {
     exit(1);
   }
 
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 4);
+  glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+  glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE);
   glfwSetErrorCallback(error_callback);
 
-  GLFWwindow *window = glfwCreateWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "My Title",
-                                        nullptr, nullptr);
+  GLFWwindow *window =
+    glfwCreateWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "My Title", nullptr, nullptr);
   if (!window) {
     std::cerr << "Error could not create window" << std::endl;
     exit(1);
@@ -211,6 +182,12 @@ int main() {
     glfwTerminate();
     exit(1);
   }
+  glEnable(GL_DEBUG_OUTPUT);
+  glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+  // Enable depth test
+  glEnable(GL_DEPTH_TEST);
+  // Accept fragment if it closer to the camera than the former one
+  glDepthFunc(GL_LESS);
 
   unsigned int VAO;
   glGenVertexArrays(1, &VAO);
@@ -218,13 +195,29 @@ int main() {
   unsigned int VBO;
   glGenBuffers(1, &VBO);
 
+  // verticies
   glBindVertexArray(VAO);
   glBindBuffer(GL_ARRAY_BUFFER, VBO);
-  glBufferData(GL_ARRAY_BUFFER, ledVertices.size(), ledVertices.data(),
+  glBufferData(GL_ARRAY_BUFFER, star.size() * sizeof(float), &star[0],
                GL_STATIC_DRAW);
-
   glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
   glEnableVertexAttribArray(0);
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
+  // end verticies
+
+  // instance data
+  unsigned int instanceVBO;
+  glGenBuffers(1, &instanceVBO);
+  glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
+  glBufferData(GL_ARRAY_BUFFER, starOffsets.size() * sizeof(glm::vec3),
+               &starOffsets[0], GL_STATIC_DRAW);
+
+  glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
+  glEnableVertexAttribArray(1);
+  glVertexAttribDivisor(1, 0);
+
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
+  // end instance data
 
   auto vertexShader = loadShaders(vertexShaderSource, GL_VERTEX_SHADER);
   auto fragmentShader = loadShaders(fragmentShaderSource, GL_FRAGMENT_SHADER);
@@ -232,30 +225,17 @@ int main() {
 
   float zFar = (SCREEN_WIDTH / 2.0) / tanf64(fov / 2.0f) + 10.0f; // 100.0f
   glm::mat4 projection = glm::perspective(
-      fov, (float)SCREEN_WIDTH / (float)SCREEN_HEIGHT, 0.1f, zFar);
+    fov, (float)SCREEN_WIDTH / (float)SCREEN_HEIGHT, 0.1f, zFar);
 
-  glm::vec3 movement(0.0f, 0.0f, LED_FLOOR);
   glm::vec3 dz(0.0, 0.0, 1.0);
-  /*
-    auto module = initMikMod();
-    if (module) {
-       start module
-
-    Player_Start(module);
-    Player_SetVolume(32);
-    }
-*/
+  float dist = 0.0f;
   while (!glfwWindowShouldClose(window)) {
     float currentFrame = glfwGetTime();
     deltaTime = currentFrame - lastFrame;
     lastFrame = currentFrame;
 
     processInput(window);
-    /*
-        if (Player_Active()) {
-          MikMod_Update();
-        }
-    */
+
     glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT |
             GL_DEPTH_BUFFER_BIT); // also clear the depth buffer now!
@@ -266,17 +246,21 @@ int main() {
     int modelprj = glGetUniformLocation(shaderProgram, "projection");
     glUniformMatrix4fv(modelprj, 1, GL_FALSE, glm::value_ptr(projection));
 
-    camera(shaderProgram);
+    camera(shaderProgram, dist);
+    dist += 1.0f;
 
     glBindVertexArray(VAO);
-    for (auto &poly : leds) {
+    // for (auto &poly : starOffsets) {
+    {
+      auto poly = starOffsets[0];
       // std::cout<<poly.x<<" "<< poly.y<< " " <<poly.z<<std::endl;
 
       glm::mat4 model = glm::mat4(1.0f);
-      model = glm::rotate(model, glm::radians(-2.8f), glm::vec3(1.0, 0.0, 0.0));
+      // model = glm::rotate(model, glm::radians(-2.8f), glm::vec3(1.0, 0.0,
+      // 0.0));
 
-      model = glm::translate(model, poly);
-      model = glm::scale(model, glm::vec3(8.0, 8.0, 1.0));
+      // model = glm::translate(model, glm::vec3(1.0, 1.0, 60.0));
+      // model = glm::scale(model, glm::vec3(8.0, 8.0, 1.0));
 
       int modelLoc = glGetUniformLocation(shaderProgram, "model");
       glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
@@ -284,29 +268,16 @@ int main() {
       dz.z = 64.0f * deltaTime / 1.0f;
       /*std::cout << "poly.z " << poly.z << " deltatime " << deltaTime
                 << std::endl;
-    */ // movement = movement + dz;
-      if (poly.z > LED_FLOOR + 1.0f) {
-        poly -= dz;
-      }
-      if (poly.z < LED_FLOOR) {
-        poly.z = LED_FLOOR;
-        std::cout << "resetting z axis" << std::endl;
-      }
-
-      glDrawArrays(GL_TRIANGLES, 0, 6);
+    */
+      glDrawArraysInstanced(GL_TRIANGLES, 0, 6, starOffsets.size());
+      // glBindVertexArray(0);
     }
-
-    dropLed(leds, 2, zFar);
 
     glfwSwapBuffers(window);
     // Keep running
     glfwPollEvents();
   }
-  /*
-    Player_Stop();
-    Player_Free(module);
-    MikMod_Exit();
-  */
+
   glDeleteVertexArrays(1, &VAO);
   glDeleteBuffers(1, &VBO);
 
