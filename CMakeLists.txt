@@ -33,7 +33,7 @@ if(NOT GLM_FOUND)
 endif(NOT GLM_FOUND)
 endif()
 include_directories(${SDL2_INCLUDE_DIRS} ${SDL2IMAGE_INCLUDE_DIRS})
-
+include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 set (SRCS
     main.cc
     glad.c
