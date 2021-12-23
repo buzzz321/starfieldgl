@@ -17,29 +17,35 @@
 constexpr int32_t SCREEN_WIDTH = 1600;
 constexpr int32_t SCREEN_HEIGHT = 1100;
 constexpr float fov = glm::radians(90.0f);
-
+const float zFar = (SCREEN_WIDTH / 2.0) / tanf64(fov / 2.0f);
 constexpr auto vertexShaderSource = R"(
 #version 330 core
 layout (location = 0) in vec3 aPos;
 layout (location = 1) in mat4 aOffset;
 
+out vec4 mycolour;
+
 uniform mat4 model;
 uniform mat4 view;
 uniform mat4 projection;
+uniform vec2 u_resolution;
 
 void main()
 {
     gl_Position = projection * view * model * aOffset * vec4(aPos, 1.0);
+
+    vec3 ndc = gl_Position.xyz / gl_Position.w;
+    mycolour = vec4(1.0,1.0,1.0,1.0)*ndc.z;
 }
 )";
 
 constexpr auto fragmentShaderSource = R"(
 #version 330 core
 out vec4 FragColor;
-
+in vec4 mycolour;
 void main()
 {
-    FragColor = vec4(1.0f, 1.0f, 1.0f, 1.0f);
+    FragColor = vec4(mycolour);
 } )";
 
 void APIENTRY glDebugOutput(GLenum source, GLenum type, unsigned int id,
@@ -101,7 +107,7 @@ void processInput(GLFWwindow *window) {
 void camera(uint32_t shaderId, [[maybe_unused]] float dist) {
   glm::mat4 view = glm::mat4(1.0f);
 
-  float zFar = (SCREEN_WIDTH / 2.0f) / tanf64(fov / 2.0f); // was 90.0f
+  // float zFar = (SCREEN_WIDTH / 2.0f) / tanf64(fov / 2.0f); // was 90.0f
   glm::vec3 cameraPos =
       glm::vec3(SCREEN_WIDTH / 2.0f, SCREEN_HEIGHT / 2.0f, zFar);
   glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
@@ -117,7 +123,7 @@ std::vector<glm::vec3> generateStarOffsets(uint32_t amount) {
   std::default_random_engine e1(r());
   std::uniform_int_distribution<int> xrand(0, (float)SCREEN_WIDTH);
   std::uniform_int_distribution<int> yrand(0, (float)SCREEN_HEIGHT);
-  std::uniform_int_distribution<int> zrand(-100.0f, 100.0f);
+  std::uniform_int_distribution<int> zrand(-zFar, zFar);
   std::vector<glm::vec3> retVal;
 
   for (float index = 0; index < (float)amount; ++index) {
@@ -145,16 +151,16 @@ int main() {
 
   // clang-format off
   std::vector<float> star = {
-      -0.5f, -0.5f, 0.0f,
-       0.5f, -0.5f, 0.0f,
-       0.5f,  0.5f, 0.0f,
-      -0.5f, -0.5f, 0.0f,
-       0.5f,  0.5f, 0.0f,
-      -0.5f,  0.5f, 0.0f
+      -0.50f, -0.50f, 0.0f,
+       0.50f, -0.50f, 0.0f,
+       0.50f,  0.50f, 0.0f,
+      -0.50f, -0.50f, 0.0f,
+       0.50f,  0.50f, 0.0f,
+      -0.50f,  0.50f, 0.0f
   };
   // clang-format on
 
-  auto starOffsets = generateStarOffsets(10000);
+  auto starOffsets = generateStarOffsets(100000);
   std::vector<glm::mat4> offsetMatrices;
 
   for (const auto &vec : starOffsets) {
@@ -276,26 +282,34 @@ int main() {
   auto fragmentShader = loadShaders(fragmentShaderSource, GL_FRAGMENT_SHADER);
   auto shaderProgram = makeShaderProgram(vertexShader, fragmentShader);
 
-  float zFar = (SCREEN_WIDTH / 2.0) / tanf64(fov / 2.0f) + 10.0f; // 100.0f
+  // float zFar = (SCREEN_WIDTH / 2.0) / tanf64(fov / 2.0f) + 10.0f; // 100.0f
   glm::mat4 projection = glm::perspective(
-      fov, (float)SCREEN_WIDTH / (float)SCREEN_HEIGHT, 0.1f, zFar);
+      fov, (float)SCREEN_WIDTH / (float)SCREEN_HEIGHT, 0.1f, zFar + 10.0f);
 
   std::uniform_int_distribution<int> zrand(-zFar, 100.0);
 
   float dist = 0;
-  std::cout << "zFar=" << zFar << std::endl;
+  std::cout << "zFar=" << zFar + 10.0f << std::endl;
   while (!glfwWindowShouldClose(window)) {
+    int width, height;
+
     float currentFrame = glfwGetTime();
     deltaTime = currentFrame - lastFrame;
     lastFrame = currentFrame;
 
     processInput(window);
+
     glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT |
             GL_STENCIL_BUFFER_BIT); // also clear the depth buffer now!  |
                                     // GL_DEPTH_BUFFER_BIT
     // 2. use our shader program when we want to render an object
     glUseProgram(shaderProgram);
+
+    glfwGetWindowSize(window, &width, &height);
+    glm::vec2 u_res(width, height);
+    int resolution = glGetUniformLocation(shaderProgram, "u_resolution");
+    glUniformMatrix4fv(resolution, 1, GL_FALSE, glm::value_ptr(u_res));
 
     int modelprj = glGetUniformLocation(shaderProgram, "projection");
     glUniformMatrix4fv(modelprj, 1, GL_FALSE, glm::value_ptr(projection));
@@ -314,12 +328,15 @@ int main() {
     for (auto &vec : starOffsets) {
       vec.z += 1;
 
-      if (vec.z > zFar) {
+      if (vec.z > zFar + 10.0f) {
         vec.z = (float)zrand(e1);
       }
-      glm::mat4 model =
-          glm::translate(glm::mat4(1.0f), glm::vec3(vec.x, vec.y, vec.z));
-      // model = glm::scale(model, glm::vec3(0.5, 0.5, 0.5));
+
+      glm::mat4 model = glm::mat4(1.0f);
+      model = glm::translate(model, glm::vec3(vec.x, vec.y, vec.z));
+      if (vec.z > zFar / 2.0f) {
+        model = glm::scale(model, glm::vec3(0.1, 0.1, 1.0));
+      }
       offsetMatrices[index] = model;
       /*     if (index == 0) {
              std::cout << "mat4" << glm::to_string(model) << std::endl;
